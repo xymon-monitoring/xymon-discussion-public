@@ -5,8 +5,8 @@ Layout produced under ``site/``::
 
     index.html               years -> months with counts
     <YYYY-Month>.html        one month, messages by date (the only month view)
-    thread/<tid>.html        one thread, all messages (a message's permalink is
-                             thread/<tid>.html#m-<id>; there are no per-msg pages)
+    thread/<tid>.html        one thread, all messages (anchor m-<id> per message)
+    msg/<id>.html            one message, canonical permalink, links back to its thread
 
 This module is the orchestrator (build()) plus the index-tab and thread-page
 writers. The page chrome and HTML primitives live in pagelib.py; the search
@@ -103,7 +103,7 @@ fetch('search-index.json').then(function(r){return r.json();}).then(function(D){
 
 # Folded into every message-page signature: bump when the RENDERING changes
 # (not the data), so the incremental manifest re-renders all pages once.
-RENDER_VERSION = "21-furniture-scraps"
+RENDER_VERSION = "22-msg-thread-link"
 
 
 _CID_IMG = re.compile(r'<img src="cid:([^"]+)"[^>]*>')
@@ -529,7 +529,13 @@ def _write_thread_pages(conn, out: Path, has_tid, atts_by_msgid,
                 f"<div class=msg><h1>{e(r['subject']) or '(no subject)'}</h1>"
                 f"<p class=meta>{badge} <b>{e(whom(r))}</b>{email}"
                 f"<br>{e(r['date_raw'])}"
-                f"{'<br>Message-Id: ' + e(r['msgid']) if r['msgid'] else ''}</p>"
+                f"{'<br>Message-Id: ' + e(r['msgid']) if r['msgid'] else ''}"
+                # back to the conversation, positioned at this message
+                # (issue #5): the thread view is the only place that shows
+                # what came before and after.
+                f"<br><a class=tlink href='../thread/{e(tid)}.html#m-{anchor}'>"
+                f"&#8617; View in thread ({len(members)} message"
+                f"{'s' if len(members) != 1 else ''})</a></p>"
                 f"{mbody}{matts}</div>")
             (out / "msg" / f"{anchor}.html").write_text(
                 page(r["subject"] or "message", msg_html, root="../",
