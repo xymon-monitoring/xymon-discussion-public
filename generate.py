@@ -103,7 +103,7 @@ fetch('search-index.json').then(function(r){return r.json();}).then(function(D){
 
 # Folded into every message-page signature: bump when the RENDERING changes
 # (not the data), so the incremental manifest re-renders all pages once.
-RENDER_VERSION = "22-msg-thread-link"
+RENDER_VERSION = "23-inline-lone-quote-folds"
 
 
 _CID_IMG = re.compile(r'<img src="cid:([^"]+)"[^>]*>')

@@ -412,3 +412,64 @@ def test_prose_paragraph_ending_in_wrote_stays_visible():
                   "merely happens to end with the word wrote:")
     out = _refold(long_prose)
     assert "merely happens to end" in _visible(out)
+
+
+def test_inline_reply_folds_lone_long_quoted_lines():
+    """An inline reply from HTML mail quotes each paragraph as ONE long line
+    and answers right below it. Two or more such lines, each a whole fold's
+    worth of copied words, fold; the answers between them stay visible.
+    Real case: Christoph Zechner answering Bruno Manzoni point by point
+    (thread 6b779020619d, October 2026), where five quoted paragraphs stayed
+    visible."""
+    q1 = ("if I remember correctly an rrd file can contain multiple "
+          "instances of the same measurement for each device")
+    q2 = ("then I think you can use the ncv or devmon style approach "
+          "to pass the parameters to the server")
+    parent = f"<div class=pt><pre>Hi,\n{q1}\n\n{q2}\n\nBruno</pre></div>"
+    child = ("<div class=pt><pre>Hi Bruno,\n"
+             f"{q1}\n"
+             "but how do I tell it I want six values per GPU?\n"
+             f"{q2}\n"
+             "I tried SPLITNCV, it only kept the first GPU.\n"
+             "Christoph</pre></div>")
+    out = fold_thread([parent, child], ["Bruno", "Christoph"])[1]
+    vis = _visible(out)
+    assert "rrd file can contain" not in vis
+    assert "devmon style approach" not in vis
+    assert "six values per GPU" in vis
+    assert "only kept the first GPU" in vis
+    assert len(_folds(out)) == 2
+
+
+def test_inline_lone_line_fold_names_who_first_wrote_it():
+    """In between, Tom re-quoted Bruno's whole message; Christoph's inline
+    reply still answers Bruno, so its lone-line folds name Bruno, not the
+    latest re-quoter (the real case named "Tom Schmidt" six times)."""
+    q1 = ("if I remember correctly an rrd file can contain multiple "
+          "instances of the same measurement for each device")
+    q2 = ("then I think you can use the ncv or devmon style approach "
+          "to pass the parameters to the server")
+    bruno = f"<div class=pt><pre>{q1}\n\n{q2}</pre></div>"
+    tom = (f"<div class=pt><pre>Look at the disk check too.\n"
+           f"Bruno wrote:\n{q1}\n\n{q2}</pre></div>")
+    christoph = ("<div class=pt><pre>Hi Bruno,\n"
+                 f"{q1}\nbut how do I tell it I want six values per GPU?\n"
+                 f"{q2}\nI tried SPLITNCV, it only kept the first GPU.</pre></div>")
+    out = fold_thread([bruno, tom, christoph], ["Bruno", "Tom", "Christoph"])[2]
+    labels = [(d.findtext('.//span[@class="meta"]') or "").strip()
+              for d in _folds(out)]
+    assert labels == ["quoted from Bruno", "quoted from Bruno"]
+
+
+def test_lone_repeated_long_line_stays_visible():
+    """One long line said again -- an error message pasted a second time --
+    is not an inline reply: it stays visible."""
+    err = ("xymond_rrd cannot bind to cache control socket address already "
+           "in use while starting the rrd handler")
+    parent = f"<div class=pt><pre>I get this at startup:\n{err}\nAny idea?</pre></div>"
+    child = ("<div class=pt><pre>Same here after the upgrade, every cycle:\n"
+             f"{err}\n"
+             "Restarting does not help.</pre></div>")
+    out = fold_thread([parent, child], ["a", "b"])[1]
+    assert "cannot bind to cache control socket" in _visible(out)
+    assert "<details" not in out

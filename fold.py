@@ -359,13 +359,23 @@ def _plan(full, prior, authors=(), mi=0, origin=None):
                          all(blank[j] for j in range(end_line + 1, len(lines)))))
         i += 1
 
+    # A lone covered line is no proof of quoting by itself: someone may paste
+    # the same error message or command again. An inline reply is different
+    # -- each quoted paragraph is one long line (HTML mail) answered right
+    # below it -- so a message holding at least two lone lines that each
+    # carry a whole fold's worth of duplicated words is quoting, and those
+    # lines fold. Two shorter quoted lines still do not (see
+    # test_inline_reply_not_swallowed).
+    inline = sum(1 for _, _, _, covered, covered_lines, led, trailing in runs
+                 if covered_lines == 1 and not (led or trailing)) >= 2
+
     planned = []
     for (cut_line, end_line, first, covered, covered_lines, led,
          trailing) in runs:
         strong_line = any(nw[j] >= _MIN_LINE_WORDS
                           for j in range(cut_line, end_line + 1)
                           if exact[j])
-        if ((covered_lines >= 2 or led or trailing)
+        if ((covered_lines >= 2 or led or trailing or inline)
                 and (strong_line or covered_lines >= 2)):
             att = next((j for j in range(cut_line, end_line + 1)
                         if attrib[j]), None)
@@ -413,9 +423,16 @@ def _plan(full, prior, authors=(), mi=0, origin=None):
                                 named if named is not None
                                 else _hist_src(att, end_line), "q"))
             else:
-                planned.append((cut_line, end_line,
-                                named if named is not None
-                                else _hist_src(cut_line, end_line), "q"))
+                # A lone line of an inline reply has no attribution, and its
+                # latest sayer is often whoever re-quoted the whole message
+                # in between; who first wrote it is whom the reply answers.
+                lone = covered_lines == 1 and not (led or trailing)
+                src = (named if named is not None
+                       else _hist_src(cut_line, end_line,
+                                      _coverage(ws, origin)
+                                      if lone and origin is not None
+                                      else None))
+                planned.append((cut_line, end_line, src, "q"))
 
     hidden_lines = {j for start, stop, _, _ in planned
                     for j in range(start, stop + 1)}
