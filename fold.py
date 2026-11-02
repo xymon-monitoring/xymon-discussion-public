@@ -329,7 +329,10 @@ def _plan(full, prior, authors=(), mi=0, origin=None):
                 sources[c[ti]] = sources.get(c[ti], 0) + 1
         return max(sources, key=sources.get) if sources else None
 
-    planned = []
+    # Candidate runs: maximal safe runs carrying enough duplicated text,
+    # trimmed to quote-adjacent blank/furniture/covered lines (this drops
+    # parser-generated empty lines at the message boundaries).
+    runs = []
     i = 0
     while i < len(lines):
         if not safe[i]:
@@ -339,79 +342,80 @@ def _plan(full, prior, authors=(), mi=0, origin=None):
         while i + 1 < len(lines) and safe[i + 1]:
             i += 1
         stop = i
-
         evidence = [j for j in range(start, stop + 1) if exact[j]]
         covered = sum(nc[j] for j in range(start, stop + 1))
         if evidence and covered >= _MIN_TAIL_COVERED:
             first, last = evidence[0], evidence[-1]
-            # Keep only quote-adjacent blank/furniture/covered lines. This
-            # trims parser-generated empty lines at the message boundaries.
             cut_line = first
             while cut_line > start and safe[cut_line - 1]:
                 cut_line -= 1
             end_line = last
             while end_line < stop and safe[end_line + 1]:
                 end_line += 1
-
-            covered_lines = sum(1 for j in range(cut_line, end_line + 1)
-                                if exact[j] and nw[j])
-            led = any(furn[j] for j in range(cut_line, first))
-            trailing = all(blank[j] for j in range(end_line + 1, len(lines)))
-            strong_line = any(nw[j] >= _MIN_LINE_WORDS
-                              for j in range(cut_line, end_line + 1)
-                              if exact[j])
-            if ((covered_lines >= 2 or led or trailing)
-                    and (strong_line or covered_lines >= 2)):
-                att = next((j for j in range(cut_line, end_line + 1)
-                            if attrib[j]), None)
-                named = (_named_author(lines[att][2], authors, mi)
-                         if att is not None else None)
-                # covered prose ABOVE the attribution line: when it is a
-                # short run repeated from the SAME author's earlier message,
-                # it is their signature -- split it into its own fold. Any
-                # other head prose means the attribution does not actually
-                # head the quote, so its name cannot label the fold either.
-                head_prose = ([j for j in range(cut_line, att)
-                               if exact[j] and not furn[j] and nw[j]]
-                              if att is not None else [])
-                sig_end = None
-                if head_prose and authors:
-                    head_cov = sum(nc[j] for j in range(cut_line, att))
-                    # who INTRODUCED the head's words: ``cov`` (latest-wins)
-                    # would name whoever re-quoted the signature most
-                    # recently, masking that it is the author's own.
-                    cov0 = (_coverage(ws, origin) if origin is not None
-                            else cov)
-                    head_srcs = {cov0[ti] for ti, (_, ln) in enumerate(toks)
-                                 if cut_line <= ln < att
-                                 and cov0[ti] is not None}
-                    if (head_cov >= _MIN_TAIL_COVERED
-                            and covered - head_cov >= _MIN_TAIL_COVERED
-                            and sum(1 for j in range(cut_line, att)
-                                    if not blank[j]) <= _MAX_SIG_LINES
-                            and all(authors[s] == authors[mi]
-                                    for s in head_srcs)
-                            and any(exact[j] and nw[j]
-                                    for j in range(att, end_line + 1))):
-                        sig_end = att - 1
-                    else:
-                        named = None
-                elif head_prose:
-                    named = None
-                if sig_end is not None:
-                    # the sig fold's provenance is who INTRODUCED the words
-                    # (cov0), not who repeated them last -- its label is the
-                    # fixed string "signature", but src must not lie either.
-                    planned.append((cut_line, sig_end,
-                                    _hist_src(cut_line, sig_end, cov0), "sig"))
-                    planned.append((att, end_line,
-                                    named if named is not None
-                                    else _hist_src(att, end_line), "q"))
-                else:
-                    planned.append((cut_line, end_line,
-                                    named if named is not None
-                                    else _hist_src(cut_line, end_line), "q"))
+            runs.append((cut_line, end_line, first, covered,
+                         sum(1 for j in range(cut_line, end_line + 1)
+                             if exact[j] and nw[j]),
+                         any(furn[j] for j in range(cut_line, first)),
+                         all(blank[j] for j in range(end_line + 1, len(lines)))))
         i += 1
+
+    planned = []
+    for (cut_line, end_line, first, covered, covered_lines, led,
+         trailing) in runs:
+        strong_line = any(nw[j] >= _MIN_LINE_WORDS
+                          for j in range(cut_line, end_line + 1)
+                          if exact[j])
+        if ((covered_lines >= 2 or led or trailing)
+                and (strong_line or covered_lines >= 2)):
+            att = next((j for j in range(cut_line, end_line + 1)
+                        if attrib[j]), None)
+            named = (_named_author(lines[att][2], authors, mi)
+                     if att is not None else None)
+            # covered prose ABOVE the attribution line: when it is a
+            # short run repeated from the SAME author's earlier message,
+            # it is their signature -- split it into its own fold. Any
+            # other head prose means the attribution does not actually
+            # head the quote, so its name cannot label the fold either.
+            head_prose = ([j for j in range(cut_line, att)
+                           if exact[j] and not furn[j] and nw[j]]
+                          if att is not None else [])
+            sig_end = None
+            if head_prose and authors:
+                head_cov = sum(nc[j] for j in range(cut_line, att))
+                # who INTRODUCED the head's words: ``cov`` (latest-wins)
+                # would name whoever re-quoted the signature most
+                # recently, masking that it is the author's own.
+                cov0 = (_coverage(ws, origin) if origin is not None
+                        else cov)
+                head_srcs = {cov0[ti] for ti, (_, ln) in enumerate(toks)
+                             if cut_line <= ln < att
+                             and cov0[ti] is not None}
+                if (head_cov >= _MIN_TAIL_COVERED
+                        and covered - head_cov >= _MIN_TAIL_COVERED
+                        and sum(1 for j in range(cut_line, att)
+                                if not blank[j]) <= _MAX_SIG_LINES
+                        and all(authors[s] == authors[mi]
+                                for s in head_srcs)
+                        and any(exact[j] and nw[j]
+                                for j in range(att, end_line + 1))):
+                    sig_end = att - 1
+                else:
+                    named = None
+            elif head_prose:
+                named = None
+            if sig_end is not None:
+                # the sig fold's provenance is who INTRODUCED the words
+                # (cov0), not who repeated them last -- its label is the
+                # fixed string "signature", but src must not lie either.
+                planned.append((cut_line, sig_end,
+                                _hist_src(cut_line, sig_end, cov0), "sig"))
+                planned.append((att, end_line,
+                                named if named is not None
+                                else _hist_src(att, end_line), "q"))
+            else:
+                planned.append((cut_line, end_line,
+                                named if named is not None
+                                else _hist_src(cut_line, end_line), "q"))
 
     hidden_lines = {j for start, stop, _, _ in planned
                     for j in range(start, stop + 1)}
