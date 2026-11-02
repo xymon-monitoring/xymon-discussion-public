@@ -332,11 +332,58 @@ console.log('4) search renders title + preview + expand toggle, and expands body
           'expanded message is body-only (no subject/meta)');
         assert(box && box.querySelector('mark'), 'expanded message highlights the term');
         assert(li.querySelector('.sprev').hidden, 'preview hidden while fully expanded');
-        finish();
-      });
+      }).then(expandFromThread).then(finish);
     }
-    finish();
+    expandFromThread().then(finish);
   }
+}
+
+// An archive or search row expands its message from the THREAD page, whose
+// copy is quote-folded against the earlier messages; the lone msg/ page is
+// unfolded and only the fallback (thread page without that message).
+function expandFromThread() {
+  console.log('5) an expanded row takes the thread page\'s folded copy; msg/ page as fallback');
+  const pages = {
+    'thread/t9.html':
+      "<details class=tmsg id=m-a1 open><summary><b>Ann</b></summary>" +
+      "<div class=pt><pre>the original question</pre></div></details>" +
+      "<details class=tmsg id=m-b2 open><summary><b>Bob</b> meta</summary>" +
+      "<div class=pt><pre>my answer</pre><details class=\"q\"><summary>" +
+      "<span class=meta> quoted from Ann</span></summary>" +
+      "<pre>the original question</pre></details></div></details>",
+    'msg/b2.html': "<div class=msg><h1>S</h1><p class=meta>Bob</p>" +
+      "<div class=pt><pre>my answer UNFOLDED</pre></div></div>",
+    'msg/c3.html': "<div class=msg><h1>S</h1><p class=meta>Cy</p>" +
+      "<div class=pt><pre>canonical copy</pre></div></div>",
+  };
+  const row = (mid, tid) =>
+    `<li><div class=sline><a class='tsub xpand' data-mid='${mid}' href='msg/${mid}.html'>S</a>` +
+    `<span class=plinks><a class=plink href='thread/${tid}.html#m-${mid}'>t</a>` +
+    `<a class=plink href='msg/${mid}.html'>l</a></span></div></li>`;
+  setGlobals(new JSDOM('<ul>' + row('b2', 't9') + row('c3', 't9') + '</ul>'));
+  const urls = [];
+  global.fetch = u => { urls.push(u); return u in pages
+    ? Promise.resolve({ text: () => Promise.resolve(pages[u]) })
+    : Promise.reject(new Error('404 ' + u)); };
+  global.window.fetch = global.fetch;
+  eval(SC);
+  const [b2, c3] = document.querySelectorAll('li');
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  b2.querySelector('.tsub').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  return wait().then(() => {
+    const box = b2.querySelector('.thmsgs');
+    assert(urls[0] === 'thread/t9.html', 'the expanded message is fetched from its thread page');
+    assert(box && box.querySelector('details.q') &&
+           box.textContent.includes('quoted from Ann'), 'its quote arrives folded');
+    assert(box && box.textContent.includes('my answer') && !box.textContent.includes('UNFOLDED'),
+           'the body is the thread copy, not the msg/ page');
+    assert(box && !box.textContent.includes('Bob'), 'the thread page\'s message header is stripped');
+    c3.querySelector('.tsub').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  }).then(wait).then(() => {
+    const box = c3.querySelector('.thmsgs');
+    assert(urls.includes('msg/c3.html') && box && box.textContent.includes('canonical copy'),
+           'a thread page without the message falls back to the msg/ page');
+  });
 }
 
 function finish() {
