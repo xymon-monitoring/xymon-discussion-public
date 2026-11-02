@@ -1466,3 +1466,32 @@ def test_obfuscate_scrubs_pii_in_archive_filename(tmp_path, monkeypatch):
         names = obfuscate._archive_names(c)
         assert names is not None
         assert not any(obfuscate._member_unsafe(n) for n in names)
+
+
+def test_msg_page_links_back_to_thread_view(tmp_path):
+    # issue #5: a msg/<id>.html page reached from search had no way back to
+    # the conversation; it must link to thread/<tid>.html#m-<id>.
+    db, out = tmp_path / "a.db", tmp_path / "site"
+    conn = mailstore.connect(str(db))
+    base = dict(month="2026-June", from_name="Ann",
+                from_email="user-x@xymon.invalid", source="list",
+                body_html=None, raw=None)
+    mailstore.insert_rows(conn, [
+        dict(base, msgid="<q@x>", in_reply_to=None, subject="Q",
+             date_iso="2026-06-01T10:00:00+00:00",
+             date_raw="Tue, 1 Jun 2026 10:00:00 -0000", body="question"),
+        dict(base, msgid="<r@x>", in_reply_to="<q@x>", subject="Re: Q",
+             date_iso="2026-06-01T11:00:00+00:00",
+             date_raw="Tue, 1 Jun 2026 11:00:00 -0000", body="answer")])
+    conn.commit()
+    conn.close()
+    generate.build(db, out)
+    (thread_path,) = list((out / "thread").glob("*.html"))
+    tid = thread_path.stem
+    for msgid in ("<q@x>", "<r@x>"):
+        mid = threads.stable_id(msgid, 16)
+        html_ = (out / "msg" / f"{mid}.html").read_text("utf-8")
+        assert (f"<a class=tlink href='../thread/{tid}.html#m-{mid}'>"
+                in html_), msgid
+        assert "View in thread (2 messages)" in html_
+        assert f"id=m-{mid}" in thread_path.read_text("utf-8")
