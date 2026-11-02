@@ -429,6 +429,7 @@ function inject(box,url,o){
   box.innerHTML='<p class=meta>Loading\\u2026</p>';
   function fail(){
     if(box._itok!==tok) return;
+    if(o.retry){ o.retry(); return; }   // another source for the same content
     box.removeAttribute('aria-busy');
     box.innerHTML=o.fallback
       ?"<p class=meta><a href='"+o.fallback+"'>open \\u2192</a></p>"
@@ -488,11 +489,19 @@ function hlTerms(box,terms){
       tn.parentNode.replaceChild(frag,tn); }
   });
 }
-// fetch one canonical message page and inject its body inline; highlight terms.
-// Body only -- the subject/author/date already show on the result/archive line.
-function loadMsg(box,mid,terms){
-  inject(box,'msg/'+mid+'.html',{sel:'.msg',strip:'h1,p.meta',
-    fallback:'msg/'+mid+'.html',terms:terms});
+// inject one message's body inline; highlight terms. Body only -- the
+// subject/author/date already show on the result/archive line. Taken from its
+// thread page when the row links one: that copy is quote-folded against the
+// earlier messages, which a lone message cannot be (fold.py works across a
+// thread). The canonical msg/ page, unfolded, is the fallback.
+function loadMsg(box,mid,terms,thref){
+  function canonical(){
+    inject(box,'msg/'+mid+'.html',{sel:'.msg',strip:'h1,p.meta',
+      fallback:'msg/'+mid+'.html',terms:terms});
+  }
+  if(!thref){ canonical(); return; }
+  inject(box,thref.split('#')[0],{sel:'#m-'+mid,strip:':scope > summary',
+    terms:terms,retry:canonical});
 }
 // ONE list row for every surface -- search results and the Threads tab call
 // this; the month pages emit the same markup server-side (generate._msg_line;
@@ -542,8 +551,10 @@ document.addEventListener('click',function(e){
   a.classList.add('thopen'); if(prev) prev.hidden=true;
   if(a.hasAttribute('data-tid'))
     loadThread(box,a.getAttribute('data-tid'),a.href);
-  else
-    loadMsg(box,a.getAttribute('data-mid'),curTerms());
+  else{
+    var th=host.querySelector('.plinks a.plink[href*="thread/"]');
+    loadMsg(box,a.getAttribute('data-mid'),curTerms(),th&&th.getAttribute('href'));
+  }
 });
 // collapse runs of >2 consecutive <br> (typed blank lines) down to 2 -- keeps
 // paragraph spacing (<br><br>) but trims a message padded with many empty lines.
@@ -642,7 +653,8 @@ def msg_name(r) -> str:
 def _xp(r) -> str:
     """Make the whole subject link an expand-in-place MESSAGE toggle (arrow +
     name) in the shared .sline grammar (same classes as script.js lineEl);
-    the global handler injects msg/<id>.html inline. href is the no-JS
+    the global handler injects the message inline, from its thread page when
+    the row links one (quote-folded), else msg/<id>.html. href is the no-JS
     fallback."""
     return (f"class='tsub xpand' data-mid='{msg_name(r)}' "
             f"href='msg/{msg_name(r)}.html'")
